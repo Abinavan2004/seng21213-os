@@ -24,6 +24,12 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
+void process_init(void);
+void scheduler_init(void);
+int create_process(void (*entry_fn)(void));
+void scheduler_timer_init(void);
+
+
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
@@ -33,6 +39,8 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_mem(void);
+static void cmd_ps(void);
+int process_get_info(int index, uint32_t *pid, int *state );
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -159,6 +167,63 @@ static void cmd_mem(void) {
                    VGA_YELLOW, VGA_BLACK);
 }
 
+static void print_number(uint32_t number)
+{
+    char buffer[11];
+    int i =0;
+
+    if(number == 0)
+    {
+        vga_puts("0");
+        return;
+    }
+
+    while(number > 0)
+    {
+        buffer[i++] = '0'+ (number%10);
+        number /=10;
+    }
+
+    while(i > 0)
+    {
+        i--;
+        char text[2];
+        text[0] = buffer[i];
+        text[1]= '\0';
+        vga_puts(text);
+    }
+}
+
+static void cmd_ps(void)
+{
+
+    uint32_t pid;
+    int state;
+    int i;
+    vga_puts_color("\n PID STATE\n", VGA_YELLOW, VGA_BLACK);
+    vga_puts(" --------------------\n");
+
+
+
+
+    for(i=0; i<8 ; i++)
+    {
+        if(process_get_info(i,&pid,&state)==0 && pid != 0)
+        {
+            vga_puts(" ");
+            print_number(pid);
+            vga_puts("      ");
+
+            if(state == 1)
+               vga_puts("READY \n");
+            else if(state == 2)
+            vga_puts("RUNNING \n");
+            else if(state == 3)
+            vga_puts("TERMINATED \n");
+        }
+    }
+    vga_puts("\n");
+}
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -182,6 +247,7 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
         if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if(k_strcmp(cmd,"ps")      == 0) { cmd_ps();    continue; }
 
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
@@ -207,14 +273,41 @@ static void shell_run(void) {
     }
 }
 
+static void process1(void)
+{
+    while(true)
+    {
+        vga_puts("p1 ");
+    }
+}
+static void process2(void)
+{
+    while(true)
+    {
+        vga_puts("p2 ");
+    }
+}
+
+
+
 /* ---------------------------------------------------------------------------
  * Kernel entry point – called from kernel_entry.asm
  * --------------------------------------------------------------------------*/
 void kernel_main(void) {
     vga_init();
     kb_init();
+
+    process_init();
+    scheduler_init();
+
     print_splash();
     shell_run();
+
+    create_process(process1);
+    create_process(process2);
+    scheduler_timer_init();
+
+
 
     /* Should never reach here */
     __asm__ __volatile__("hlt");
