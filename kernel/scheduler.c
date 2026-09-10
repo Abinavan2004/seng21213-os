@@ -1,5 +1,5 @@
 #include "../include/types.h"
-
+#include "thread.h"
 #define IDT_ENTRIES 256
 
 typedef struct{
@@ -32,7 +32,7 @@ static void idt_set_gate(int num, uint32_t handler)
     idt[num].selector = 0x08;
     idt[num].zero = 0;
     idt[num].type_attr = 0x8E;
-    idt[num].offset_high = (handler >> 16 )& 0xFFFF;
+    idt[num].offset_high = (handler >> 16 ) & 0xFFFF;
      
 }
 
@@ -110,9 +110,19 @@ typedef struct {
 extern pcb_t process_table[MAX_PROCESSES];
 
 static int current_process = -1;
+typedef enum
+{
+    SCHED_PROCESS,
+    SCHED_THREAD
+
+}sched_entity_type_t;
+
+static sched_entity_type_t current_entity_type = SCHED_PROCESS;
+
 void scheduler_init(void)
 {
     current_process=-1;
+    thread_init();
 }
 int scheduler_next(void)
 {
@@ -127,41 +137,117 @@ for(i=1; i <= MAX_PROCESSES ; i++)
 }
 return -1;
 }
+static int scheduler_next_thread(void)
+{
+    return thread_next_ready();
+
+}
 
 int scheduler_schedule(void)
 {
-    int next;
-    next = scheduler_next();
-    if(next == -1)
-    {
-        return -1;
-    }
-    if(current_process >= 0 && process_table[current_process].state == PROCESS_RUNNING)
-    {
-        process_table[current_process].state = PROCESS_READY;
-    }
+    int next_process;
+    int next_thread;
 
-    current_process = next;
-    process_table[current_process].state = PROCESS_RUNNING;
-    return current_process;
+    next_process= scheduler_next();
+    next_thread= scheduler_next_thread();
+    if(current_entity_type == SCHED_PROCESS)
+    {
+        if(next_thread != -1)
+        {
+            if(current_process >= 0 && process_table[current_process].state == PROCESS_RUNNING)
+            {
+                process_table[current_process].state = PROCESS_READY;
+            }
+
+            
+            thread_set_running(next_thread);
+            current_entity_type = SCHED_THREAD;
+            return next_thread;
+        }
+        if(next_process != -1)
+        {
+            if(current_process >= 0 && process_table[current_process].state == PROCESS_RUNNING)
+            {
+                process_table[current_process].state = PROCESS_READY;
+            }
+            current_process = next_process;
+            process_table[current_process].state = PROCESS_RUNNING;
+
+            return current_process;
+        }
+    }
+    else 
+    {
+        
+            int old_thread = thread_get_current();
+
+            if(old_thread >= 0 && thread_get_state(old_thread) == THREAD_RUNNING)
+            {
+                thread_set_ready(old_thread);
+            }
+        
+        if(next_process != -1)
+        {
+            current_process = next_process;
+            process_table[current_process].state = PROCESS_RUNNING;
+            current_entity_type = SCHED_PROCESS;
+
+            return current_process;
+        }
+        if(next_thread != -1)
+        {
+                thread_set_running(next_thread);
+                current_entity_type = SCHED_THREAD;
+
+                return next_thread;
+         }
+    }
+     
+    return -1;
 }
 
 uint32_t *scheduler_irq0_handler(uint32_t *current_sp)
+
 {
+    if(current_entity_type == SCHED_PROCESS)
+    {
     if(current_process >= 0 && process_table[current_process].state == PROCESS_RUNNING)
     {
         process_table[current_process].stack_pointer = current_sp;
     }
+
+    }
+    else
+    {
+        int thread_index = thread_get_current();
+
+        if(thread_index >= 0 && thread_get_state(thread_index)!= THREAD_TERMINATED)
+        {
+            thread_save_stack(thread_index , current_sp);
+        }
+    }
+
     scheduler_schedule();
 
     outb(0x20 , 0x20);
 
+    if(current_entity_type == SCHED_PROCESS)
+    {
 
     if(current_process >= 0)
     {
         return process_table[current_process].stack_pointer;
     }
+}
+else 
+{
+    int thread_index = thread_get_current();
 
+    if(thread_index >= 0)
+    {
+        return thread_get_stack(thread_index);
+    }
+}
     return current_sp;
 
     

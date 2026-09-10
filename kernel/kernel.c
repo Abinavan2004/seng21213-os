@@ -24,6 +24,9 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
+#include "thread.h"
+#include "mutex.h"
+#include "semaphore.h"
 void process_init(void);
 void scheduler_init(void);
 int create_process(void (*entry_fn)(void));
@@ -277,19 +280,154 @@ static void process1(void)
 {
     while(true)
     {
-        vga_puts("p1 ");
+        vga_set_cursor(0,0);
+        vga_puts("process 1 running     ");
+
     }
 }
 static void process2(void)
 {
     while(true)
     {
-        vga_puts("p2 ");
+          vga_set_cursor(1,0);
+        vga_puts("process 2 running     ");
     }
 }
 
+void test_thread(void *arg)
+{
+    volatile uint32_t *counter = (volatile uint32_t *)arg;
+    volatile uint16_t *vga = (volatile uint16_t *)0xB8000;
+    while(1)
+    {
+        (*counter)++;
+        vga[23 * 80 + 70] = (uint16_t)(0x0F00 | 'T');
+    }
+}
 
+static mutex_t test_mutex;
+static uint32_t shared_counter = 0;
 
+void mutex_test_thread(void *arg)
+{
+    volatile uint32_t *counter = (volatile uint32_t *)arg;
+    uint32_t i;
+
+    for(i=0; i < 1000 ; i++)
+    {
+        mutex_lock(&test_mutex);
+
+        (*counter)++;
+        
+        mutex_unlock(&test_mutex);
+    }
+    thread_exit();
+}
+
+static mutex_t race_mutex;
+static uint32_t myglobal = 0;
+static uint32_t protected_finished = 0;
+
+void race_thread(void *arg)
+{
+    volatile uint32_t *value = (volatile uint32_t *)arg;
+    uint32_t i;
+    for(i=0 ; i< 10000; i++)
+    {
+      mutex_lock(&race_mutex);
+        (*value)++;
+
+        mutex_unlock(&race_mutex);
+    }
+    mutex_lock(&race_mutex);
+    protected_finished ++;
+
+    if(protected_finished == 2)
+    {
+        vga_set_cursor(10,0);
+        vga_printf("protected result : %u", *value);
+    }
+
+    mutex_unlock(&race_mutex);
+    while(1)
+    {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static uint32_t race_without_mutex = 0;
+void race_no_mutex_thread(void *arg)
+{
+    volatile uint32_t *value = (volatile uint32_t *)arg;
+    uint32_t temp;
+    uint32_t i;
+    for(i=0 ; i< 10000; i++)
+    {
+        temp = *value;
+        __asm__ __volatile__("sti");
+        
+
+        *value = temp +1;
+    }
+
+    vga_set_cursor(11,0);
+    vga_printf("unprotected result : %u", *value);
+
+    while(1)
+    {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+#define BUFFER_SIZE 4
+
+static int buffer[BUFFER_SIZE];
+static int buffer_in = 0;
+static int  buffer_out = 0;
+
+static semaphore_t empty;
+static semaphore_t full;
+static semaphore_t buffer_mutex;
+
+void producer(void *arg)
+{
+    int item = 0;
+
+    (void)arg;
+
+    while(1)
+    {
+        semaphore_wait(&empty);
+        semaphore_wait(&buffer_mutex);
+
+        buffer[buffer_in] = item++;
+        buffer_in = (buffer_in +1)% BUFFER_SIZE;
+
+        semaphore_signal(&buffer_mutex);
+        semaphore_signal(&full);
+    }
+}
+
+void consumer(void *arg)
+{
+    int item;
+    (void)arg;
+
+    while(1)
+    {
+        semaphore_wait(&full);
+        semaphore_wait(&buffer_mutex);
+
+        item = buffer[buffer_out];
+        buffer_out = (buffer_out+1)% BUFFER_SIZE;
+
+        semaphore_signal(&buffer_mutex);
+        semaphore_signal(&empty);
+
+        (void)item;
+
+    }
+}
 /* ---------------------------------------------------------------------------
  * Kernel entry point – called from kernel_entry.asm
  * --------------------------------------------------------------------------*/
@@ -299,15 +437,36 @@ void kernel_main(void) {
 
     process_init();
     scheduler_init();
+   
 
-    print_splash();
-    shell_run();
+    
 
     create_process(process1);
     create_process(process2);
+    mutex_init(&test_mutex);
+
+    thread_create(mutex_test_thread, &shared_counter);
+     thread_create(mutex_test_thread, &shared_counter);
+
+   mutex_init(&race_mutex);
+   thread_create(race_thread , &myglobal);
+   thread_create(race_thread , &myglobal);
+
+   thread_create(race_no_mutex_thread , &race_without_mutex);
+   thread_create(race_no_mutex_thread , &race_without_mutex);
+
+   semaphore_init(&empty , BUFFER_SIZE);
+   semaphore_init(&full , 0);
+   semaphore_init(&buffer_mutex, 1);
+
+   thread_create(producer , NULL);
+   thread_create(consumer , NULL);
+
+
     scheduler_timer_init();
 
-
+        print_splash();
+        shell_run();
 
     /* Should never reach here */
     __asm__ __volatile__("hlt");
