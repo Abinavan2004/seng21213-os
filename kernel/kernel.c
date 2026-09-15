@@ -27,6 +27,7 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
 void process_init(void);
 void scheduler_init(void);
 int create_process(void (*entry_fn)(void));
@@ -158,16 +159,32 @@ static void cmd_echo(const char *args) {
 }
 
 static void cmd_mem(void) {
-    /* Stage 0 stub – students implement the real PMM in Lecture 11 */
-    vga_puts_color("\n  Memory Map (stub – implement PMM in Lecture 11)\n",
-                   VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  0x00000000 – 0x000FFFFF  :  First 1 MB (reserved/BIOS)\n");
-    vga_puts("  0x00100000 – 0x00EFFFFF  :  Extended memory (usable ~14 MB)\n");
-    vga_puts("  0x00F00000 – 0x00FFFFFF  :  BIOS / ROM area\n");
-    vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
-    vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
-                   VGA_YELLOW, VGA_BLACK);
+    // /* Stage 0 stub – students implement the real PMM in Lecture 11 */
+    // vga_puts_color("\n  Memory Map (stub – implement PMM in Lecture 11)\n",
+    //                VGA_LIGHT_CYAN, VGA_BLACK);
+    // vga_puts("  ─────────────────────────────────────────────\n");
+    // vga_puts("  0x00000000 – 0x000FFFFF  :  First 1 MB (reserved/BIOS)\n");
+    // vga_puts("  0x00100000 – 0x00EFFFFF  :  Extended memory (usable ~14 MB)\n");
+    // vga_puts("  0x00F00000 – 0x00FFFFFF  :  BIOS / ROM area\n");
+    // vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
+    // vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
+    //                VGA_YELLOW, VGA_BLACK);
+
+    uint32_t total = pmm_get_total_frames();
+    uint32_t free = pmm_get_free_frames();
+    uint32_t used = total - free;
+   
+    uint32_t total_mb = (total * 4) / 1024;
+    uint32_t used_mb = (used * 4) / 1024;
+    uint32_t free_mb = (free * 4) / 1024;
+  
+    vga_puts_color("\n memory information \n" ,VGA_LIGHT_CYAN , VGA_BLACK);
+    
+    vga_printf("total memory : %u MB \n", total_mb);
+     vga_printf("used memory : %u MB \n", used_mb);
+     vga_printf("free memory : %u MB \n", free_mb);
+    
+
 }
 
 static void print_number(uint32_t number)
@@ -227,6 +244,45 @@ static void cmd_ps(void)
     }
     vga_puts("\n");
 }
+
+
+static void cmd_pmm_test(void)
+{
+    uint32_t frames[100];
+    uint32_t before;
+    uint32_t after;
+    uint32_t i;
+
+    before = pmm_get_free_frames();
+
+    for(i=0 ; i <100 ; i++)
+    {
+        frames[i] = pmm_alloc_frame();
+
+        if(frames[i] == 0xFFFFFFFF)
+        {
+            vga_puts_color("\n pmm test failed : allocation \n ", VGA_LIGHT_RED, VGA_BLACK);
+            return ;
+        }
+    }
+     for(i=0 ; i <100 ; i++)
+    {
+        pmm_free_frame(frames[i]);
+    }
+
+    after = pmm_get_free_frames();
+    if(after == before)
+    {
+        vga_puts_color("\n pmm test passed : 100 frames allocated and free \n ", VGA_LIGHT_GREEN, VGA_BLACK);
+
+    }
+    else
+    {
+       vga_puts_color("\n pmm test failed : memory leak detected \n ", VGA_LIGHT_RED, VGA_BLACK);
+       vga_printf("before: %u \n ", before); 
+       vga_printf("after: %u \n ", after); 
+    }
+}
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -249,7 +305,8 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "help")  == 0) { cmd_help();  continue; }
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
-        if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if (k_strcmp(cmd, "meminfo")   == 0) { cmd_mem();   continue; }
+         if (k_strcmp(cmd, "pmmtest")   == 0) { cmd_pmm_test();   continue; }
         if(k_strcmp(cmd,"ps")      == 0) { cmd_ps();    continue; }
 
         if (k_strncmp(cmd, "echo ", 5) == 0) {
@@ -435,12 +492,10 @@ void kernel_main(void) {
     vga_init();
     kb_init();
 
+   pmm_init();
+
     process_init();
     scheduler_init();
-   
-
-    
-
     create_process(process1);
     create_process(process2);
     mutex_init(&test_mutex);
@@ -461,12 +516,13 @@ void kernel_main(void) {
 
    thread_create(producer , NULL);
    thread_create(consumer , NULL);
-
+    
+   print_splash();
+   shell_run();
 
     scheduler_timer_init();
 
-        print_splash();
-        shell_run();
+        
 
     /* Should never reach here */
     __asm__ __volatile__("hlt");

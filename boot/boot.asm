@@ -39,21 +39,72 @@ load_kernel:
     mov  es, bx
     xor  bx, bx
 
-    mov  ah, 0x02          ; BIOS read sectors
-    mov  al, 64            ; Number of sectors to read
-    mov  ch, 0             ; Cylinder 0
-    mov  cl, 2             ; Start from sector 2 (sector 1 is MBR)
-    mov  dh, 0             ; Head 0
+    mov  ch, 0        ; BIOS read sectors
+    mov  cl, 2            ; Number of sectors to read
+    mov  dh, 0            ; Cylinder 0
+    
     mov  dl, [boot_drive]  ; Drive number
-    int  0x13
-    jc   disk_error        ; Carry flag set = error
+    mov  si, 23
 
-    mov  si, msg_ok
-    call print_rm
+read_sector:
+    mov ah, 0x02
+    mov al, 1
 
+    int 0x13
+    jc disk_error
+
+    add bx,  512
+    dec si
+
+
+    or si,si
+    je kernel_loaded
+
+    inc cl
+    cmp cl, 19
+    jmp read_sector
+
+    mov cl, 1
+    inc dh
+    jmp read_sector
+
+kernel_loaded:
+   mov si, msg_ok
+   call print_rm
+
+   call get_memory_map
+   jmp enter_pm
+
+get_memory_map:
+     
+    xor ebx, ebx
+    xor ax, ax
+    mov es, ax
+    mov di, 0x9004
+    xor si,si 
+
+.next_entry:
+    mov eax, 0xE820
+    mov edx, 0x534D4150
+    mov cx, 24
+
+    int 0x15
+    jc .done
+
+    
+    inc si
+    add di, 24
+
+    test ebx, ebx
+    jnz .next_entry
+
+.done:
+    mov [0x9000], si
+    ret        
 ; ---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
+
 enter_pm:
     cli
     lgdt [gdt_descriptor]  ; Load the Global Descriptor Table
@@ -71,6 +122,7 @@ enter_pm:
 [BITS 32]
 init_pm32:
     ; Set all data segment registers to the data descriptor
+    
     mov  ax, DATA_SEG
     mov  ds, ax
     mov  ss, ax
@@ -79,15 +131,14 @@ init_pm32:
     mov  gs, ax
 
     ; Set up a proper kernel stack at 0x90000
-    mov  ebp, 0x90000
-    mov  esp, ebp
+   
+    mov  esp, 0x90000
 
     ; Jump to the kernel entry point (loaded at 0x10000)
     call 0x10000
 
     ; Should never return, but halt if it does
-    hlt
-
+    
 ; ---------------------------------------------------------------------------
 ; Error handlers
 ; ---------------------------------------------------------------------------
