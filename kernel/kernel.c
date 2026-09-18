@@ -28,6 +28,8 @@
 #include "mutex.h"
 #include "semaphore.h"
 #include "pmm.h"
+#include "fs.h"
+#include "string.h"
 void process_init(void);
 void scheduler_init(void);
 int create_process(void (*entry_fn)(void));
@@ -294,7 +296,7 @@ static void shell_run(void) {
                    VGA_LIGHT_GREEN, VGA_BLACK);
 
     while (true) {
-        vga_puts_color(prompt, VGA_LIGHT_GREEN, VGA_BLACK);
+        vga_puts(" ksh> ");
         kb_readline(shell_buf, sizeof(shell_buf));
 
         /* Trim leading whitespace */
@@ -308,18 +310,25 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "meminfo")   == 0) { cmd_mem();   continue; }
          if (k_strcmp(cmd, "pmmtest")   == 0) { cmd_pmm_test();   continue; }
         if(k_strcmp(cmd,"ps")      == 0) { cmd_ps();    continue; }
-
-        if (k_strncmp(cmd, "echo ", 5) == 0) {
-            cmd_echo(k_ltrim(cmd + 5));
+        
+        
+        if(strcmp(cmd,"ls")==0){fs_list();}
+        if(strcmp(cmd,"touch", 6) == 0)
+        {fs_touch(cmd + 6);}
+        if(strcmp(cmd,"cat", 4) == 0)
+         {fs_cat(cmd + 4);}
+         if(strcmp(cmd,"rm", 3)==0)
+         {fs_rm(cmd + 3);}
+      /*  if(k_strcmp(cmd,"ls") == 0)
+        {
+            fs_list();
             continue;
-        }
-
+        }*/
         /* Milestone stubs */
         if (k_strcmp(cmd, "ps")      == 0 ||
             k_strcmp(cmd, "kill")    == 0 ||
             k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
             k_strcmp(cmd, "cat")     == 0) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
                            VGA_YELLOW, VGA_BLACK);
@@ -493,6 +502,7 @@ void kernel_main(void) {
     kb_init();
 
    pmm_init();
+   fs_init();
 
     process_init();
     scheduler_init();

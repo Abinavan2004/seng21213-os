@@ -132,7 +132,7 @@ init_pm32:
 
     ; Set up a proper kernel stack at 0x90000
    
-    mov  esp, 0x90000
+    mov  esp, 0x140000
 
     ; Jump to the kernel entry point (loaded at 0x10000)
     call 0x10000
